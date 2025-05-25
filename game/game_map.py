@@ -1,60 +1,50 @@
-# --------------------------
-# FILE: game_map.py
-# Purpose: Stores and manipulates 2D game map
-# --------------------------
 
-from common.constants import *
+### File: game_map.py
 import random
+from common.constants import *
 
 class GameMap:
-    def __init__(self, map_lines):
-        """
-        Initialize the game map from a list of strings.
-        Each line is a row of the map.
-        """
-        self.grid = [list(row) for row in map_lines]
-        self.height = len(self.grid)
-        self.width = len(self.grid[0]) if self.grid else 0
+    def __init__(self, width, height, star_count):
+        self.width = width
+        self.height = height
+        self.map = [[EMPTY for _ in range(width)] for _ in range(height)]
+        self.initial_stars = {}
+        self.place_random_elements(star_count)
 
-    def in_bounds(self, x, y):
-        return 0 <= x < self.height and 0 <= y < self.width
+    def place_random_elements(self, star_count):
+        # Randomly place stars and some special elements
+        positions = random.sample([(x, y) for x in range(self.width) for y in range(self.height)], star_count + 5)
+        for i in range(star_count):
+            x, y = positions[i]
+            self.map[y][x] = STAR
+            self.initial_stars[(x, y)] = STAR
+        for x, y in positions[star_count:]:
+            self.map[y][x] = random.choice([TRAP, ENEMY, LAVA])
 
-    def get_tile(self, x, y):
-        if self.in_bounds(x, y):
-            return self.grid[x][y]
-        return TILE_WALL  # Treat out-of-bounds as wall
+    def render(self, player):
+        for y in range(self.height):
+            row = ''
+            for x in range(self.width):
+                if (x, y) == (player.x, player.y):
+                    row += player.symbol
+                else:
+                    row += self.map[y][x]
+            print(row)
 
-    def set_tile(self, x, y, value):
-        if self.in_bounds(x, y):
-            self.grid[x][y] = value
+    def get_cell(self, x, y):
+        return self.map[y][x]
 
-    def find_all(self, target_tile):
-        """
-        Return a list of all (x, y) coordinates containing the given tile.
-        """
-        positions = []
-        for x in range(self.height):
-            for y in range(self.width):
-                if self.grid[x][y] == target_tile:
-                    positions.append((x, y))
-        return positions
+    def set_cell(self, x, y, value):
+        self.map[y][x] = value
 
-    def find_empty(self):
-        """
-        Return a random empty (non-wall) location.
-        """
-        empty_tiles = []
-        for x in range(self.height):
-            for y in range(self.width):
-                if self.grid[x][y] == TILE_EMPTY:
-                    empty_tiles.append((x, y))
-        return random.choice(empty_tiles) if empty_tiles else (1, 1)
+    def reset_stars(self):
+        # Reset all stars to initial positions
+        for (x, y), _ in self.initial_stars.items():
+            self.map[y][x] = STAR
 
-    def as_string_list(self):
-        return ["".join(row) for row in self.grid]
+    def count_collected_stars(self):
+        # Count how many stars have been collected
+        return sum(1 for (x, y) in self.initial_stars if self.map[y][x] == EMPTY)
 
-    def clone(self):
-        return GameMap(self.as_string_list())
-
-    def __repr__(self):
-        return "\n".join(self.as_string_list())
+    def total_initial_stars(self):
+        return len(self.initial_stars)
