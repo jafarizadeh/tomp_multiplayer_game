@@ -1,7 +1,8 @@
 from game.player import Player
 from common.constants import *
+from utils.rand import SimpleRandom
 
-import random
+rand = SimpleRandom()
 
 class GameLogic:
     def __init__(self, game_map):
