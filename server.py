@@ -1,129 +1,101 @@
-import threading
-import time
+# --------------------------
+# FILE: server.py
+# Purpose: Multiplayer game server
+# --------------------------
 
+import socket
+import threading
+from game.map_loader import load_map
+from game.game_map import GameMap
 from game.logic import GameLogic
 from game.player import Player
-from game.game_map import GameMap
-from game.map_loader import load_map
-from common.constants import VALID_DIRECTIONS
-from common.network import create_server, accept_connection, NetworkSocket
+from common.network import NetworkSocket
+from common.constants import PLAYER_SYMBOLS
 from utils.logger import Logger
-
-# --- Configuration ---
-HOST = "0.0.0.0"
-PORT = 9009
-TICK_INTERVAL = 0.25
-LEVEL = 1
 
 log = Logger("SERVER", log_level="DEBUG")
 
-# --- Load map from file ---
-try:
-    map_data = load_map(LEVEL)
-except Exception as e:
-    log.error(f"Failed to load map for level {LEVEL}: {e}")
-    raise SystemExit(1)
-
-# --- Init game ---
-game_map = GameMap(map_data)
-game_logic = GameLogic(game_map)
+HOST = "0.0.0.0"
+PORT = 9009
 clients = {}
-lock = threading.Lock()
+game_logic = None
 
-def assign_player_id():
-    for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-        if char not in game_logic.players:
-            return char
-    raise Exception("Too many players")
-
-def find_spawn_position():
-    for y, row in enumerate(game_map.grid):
-        for x, tile in enumerate(row):
-            if tile == ".":
-                return (x, y)
-    return (1, 1)
-
-def handle_client(net: NetworkSocket):
+def handle_client(net, addr):
+    global game_logic
     player_id = None
+
     try:
         while True:
             msg = net.recv_message()
-            if msg is None:
+            if msg == "__DISCONNECTED__":
+                log.warn(f"[{addr}] disconnected.")
                 break
+            if msg is None:
+                continue
+
+            log.info(f"[{addr}] Received: {msg}")
 
             if msg["type"] == "join":
-                name = msg["payload"]["name"]
-                player_id = assign_player_id()
-                spawn = find_spawn_position()
-                player = Player(player_id, name, spawn)
+                player_id = PLAYER_SYMBOLS[len(game_logic.players)]
+                pos = game_logic.game_map.find_empty()
+                player = Player(player_id, msg["payload"].get("name", player_id), pos)
+                game_logic.add_player(player)
+                clients[player_id] = net
 
-                with lock:
-                    game_logic.add_player(player)
-                    game_map.set_tile(spawn[0], spawn[1], player_id)
-                    clients[player_id] = net
-
-                log.info(f"Player {name} joined as {player_id} at {spawn}")
                 net.send_message("init", {
                     "player_id": player_id,
-                    "map": game_map.as_string_list()
+                    "map": game_logic.game_map.as_string_list()
                 })
+                log.info(f"Player {player_id} joined at {pos}")
 
-            elif msg["type"] == "move" and player_id:
-                direction = msg["payload"].get("dir")
-                if direction in VALID_DIRECTIONS:
-                    with lock:
-                        game_logic.handle_move(player_id, direction)
-                        log.debug(f"{player_id} moved {direction}")
+            elif msg["type"] == "move":
+                if player_id:
+                    direction = msg["payload"].get("dir")
+                    log.info(f"Move from {player_id}: {direction}")
+                    game_logic.handle_move(player_id, direction)
+                    broadcast()
 
     except Exception as e:
-        log.error(f"Client error: {e}")
+        import traceback
+        log.error(f"Client error: {e}\n{traceback.format_exc()}")
     finally:
-        log.warn(f"Disconnect: {player_id}")
-        with lock:
-            if player_id in game_logic.players:
-                pos = game_logic.players[player_id].position
-                game_map.set_tile(pos[0], pos[1], ".")
-                del game_logic.players[player_id]
-            clients.pop(player_id, None)
+        if player_id and player_id in clients:
+            del clients[player_id]
         net.close()
+        log.info(f"[{addr}] Connection closed.")
 
-def broadcast(message):
-    for pid, net in list(clients.items()):
+def broadcast():
+    state = game_logic.get_state()
+    state["type"] = "update"
+    for pid, net in clients.items():
         try:
-            net.send_raw(message)
+            net.send_raw(state)
         except Exception as e:
-            log.error(f"Broadcast to {pid} failed: {e}")
-
-def game_loop():
-    while True:
-        time.sleep(TICK_INTERVAL)
-        with lock:
-            msg = {
-                "type": "update",
-                "payload": {
-                    "map": game_map.as_string_list(),
-                    "players": {pid: {"score": p.score} for pid, p in game_logic.players.items()},
-                    "events": game_logic.events
-                }
-            }
-            game_logic.events = []
-        broadcast(msg)
+            log.warn(f"Broadcast failed to {pid}: {e}")
 
 def main():
-    log.info(f"Launching game server for level {LEVEL} at {HOST}:{PORT}")
-    server_sock = create_server(HOST, PORT)
+    global game_logic
+    log.info(f"Starting server on {HOST}:{PORT}")
+    game_map = GameMap(load_map(1))
+    game_logic = GameLogic(game_map)
 
-    threading.Thread(target=game_loop, daemon=True).start()
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind((HOST, PORT))
+    s.listen()
+    log.info(f"Server listening at {HOST}:{PORT}")
 
     try:
         while True:
-            net = accept_connection(server_sock, logger=Logger("CONN"))
-            if net:
-                threading.Thread(target=handle_client, args=(net,), daemon=True).start()
+            conn, addr = s.accept()
+            log.info(f"Accepted connection from {addr}")
+            net = NetworkSocket(conn, str(addr), logger=Logger("NET", log_level="DEBUG"))
+            threading.Thread(target=handle_client, args=(net, addr), daemon=True).start()
     except KeyboardInterrupt:
-        log.warn("Server shutdown requested.")
+        log.warn("Server interrupted by user.")
     finally:
-        server_sock.close()
+        s.close()
+        log.info("Server shut down.")
 
 if __name__ == "__main__":
     main()

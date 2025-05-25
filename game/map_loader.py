@@ -1,3 +1,8 @@
+# --------------------------
+# FILE: map_loader.py
+# Purpose: Load level maps from /maps directory
+# --------------------------
+
 import os
 
 def load_map(level_number, base_path="maps"):

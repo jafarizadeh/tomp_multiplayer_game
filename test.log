@@ -1,0 +1,8 @@
+[2025-05-25 17:23:40][TEST][DEBUG] This is a debug message.
+[2025-05-25 17:23:40][TEST][INFO] This is an info message.
+[2025-05-25 17:23:40][TEST][WARN] This is a warning.
+[2025-05-25 17:23:40][TEST][ERROR] This is an error.
+[2025-05-25 17:23:55][TEST][DEBUG] This is a debug message.
+[2025-05-25 17:23:55][TEST][INFO] This is an info message.
+[2025-05-25 17:23:55][TEST][WARN] This is a warning.
+[2025-05-25 17:23:55][TEST][ERROR] This is an error.
